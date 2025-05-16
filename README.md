@@ -10,7 +10,8 @@ This project provides a robust document processing system that:
 2. Extracts text content using MarkItDown
 3. Generates embeddings using Ollama
 4. Saves results as markdown and embedding files
-5. Implements a restart mechanism to continue processing where it left off
+5. Uploads markdown files to an API endpoint
+6. Implements a restart mechanism to continue processing where it left off
 
 The system is designed following SOLID principles, making it easy to extend and maintain.
 
@@ -18,6 +19,7 @@ The system is designed following SOLID principles, making it easy to extend and 
 
 - **Document Extraction**: Extract text from PDFs, DOCX files, and images
 - **Embeddings Generation**: Create embeddings using Ollama's models
+- **API Integration**: Upload processed markdown files to an API endpoint
 - **Restart Capability**: Resume processing from where it left off
 - **Extensible Architecture**: Easily add support for new file types or processing methods
 - **Error Handling**: Gracefully handles processing errors and saves error information
@@ -64,6 +66,9 @@ Options:
 - `--output-dir`: Directory to save output files (default: "output")
 - `--enable-plugins`: Enable MarkItDown plugins
 - `--embedding-model`: Ollama model to use for embeddings (default: "nomic-embed-text")
+- `--api-url`: API URL for uploading files (default: "http://localhost:3000")
+- `--api-token`: API token for authentication
+- `--skip-upload`: Skip uploading files to API
 
 ## Architecture
 
@@ -80,6 +85,10 @@ The project follows SOLID principles with a clean, modular architecture:
 - **EmbeddingGenerator**: Interface for generating embeddings
   - **OllamaEmbeddingGenerator**: Implementation using Ollama
   - **NullEmbeddingGenerator**: Null implementation when embeddings aren't needed
+  
+- **FileUploader**: Interface for uploading files to external services
+  - **ApiFileUploader**: Implementation using HTTP requests
+  - **NullFileUploader**: Null implementation when file uploading isn't needed
 
 - **DocumentProcessingService**: Service that orchestrates the process
 
@@ -88,6 +97,7 @@ The project follows SOLID principles with a clean, modular architecture:
 - **Markdown (.md)**: Contains the extracted text content
 - **JSON (.json)**: Human-readable version of embeddings with metadata
 - **Progress (.json)**: Tracks processing progress for restart capability
+- **Upload Results (.json)**: Tracks file upload results and statuses
 
 ## Development
 
@@ -112,3 +122,8 @@ extensions = {
 
 1. Modify the `OllamaEmbeddingGenerator` to use different models
 2. Or create a new implementation of the `EmbeddingGenerator` interface
+
+### Implementing New Upload Destinations
+
+1. Create a new implementation of the `FileUploader` interface
+2. Pass it to the `DocumentProcessingService`

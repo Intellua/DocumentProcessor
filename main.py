@@ -5,6 +5,7 @@ from document_processor import (
     ExtensionBasedFileFinder,
     MarkItDownProcessor,
     OllamaEmbeddingGenerator,
+    ApiFileUploader,
     DocumentProcessingService
 )
 
@@ -17,12 +18,15 @@ def main():
     parser.add_argument("--output-dir", default="output", help="Directory to save markdown output")
     parser.add_argument("--enable-plugins", action="store_true", help="Enable MarkItDown plugins")
     parser.add_argument("--embedding-model", default="nomic-embed-text", help="Ollama model to use for embeddings")
+    parser.add_argument("--api-url", default="http://localhost:3000", help="API URL for uploading files")
+    parser.add_argument("--api-token", default="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImQxYjc5NjFmLTJmMGQtNGRiOC1iMWIzLTcxMWM3YjgxOWFkOCJ9.CNR6LNVIM5iO9ZaDy3qXD7oEVEDRi_9iv1zLCP9nPjc", help="API token for authentication")
+    parser.add_argument("--skip-upload", action="store_true", help="Skip uploading files to API")
     args = parser.parse_args()
     
     # Define file types to process (PDF, DOCX, and images)
     extensions = {
         # Documents
-        "pdf", "docx", "txt"
+        "pdf", "docx", "txt",
         # Images
         "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp"
     }
@@ -32,10 +36,19 @@ def main():
     document_processor = MarkItDownProcessor(enable_plugins=args.enable_plugins)
     embedding_generator = OllamaEmbeddingGenerator(model=args.embedding_model, base_url="http://localhost:11434", api_key=None)
     
+    # Create file uploader if not skipped
+    file_uploader = None
+    if not args.skip_upload:
+        if not args.api_token:
+            print("Warning: API token not provided. File upload will be skipped.")
+        else:
+            file_uploader = ApiFileUploader(api_url=args.api_url, token=args.api_token)
+    
     processing_service = DocumentProcessingService(
         file_finder,
         document_processor,
         embedding_generator,
+        file_uploader,
         output_dir=args.output_dir
     )
     
@@ -44,7 +57,7 @@ def main():
     print(f"Saving markdown output to '{args.output_dir}' directory...")
     
     # Process documents and get results
-    progress, errors = processing_service.process_directory(args.input_dir)
+    progress, errors, upload_results = processing_service.process_directory(args.input_dir)
     
     # Display results
     if not progress:
@@ -76,6 +89,17 @@ def main():
         print(f"\nAll results saved to: {args.output_dir}")
         print(f"Progress file saved to: {processing_service.progress_file}")
         print(f"Embeddings were generated using the '{args.embedding_model}' model")
+        
+        # Show upload results if any
+        if upload_results:
+            print(f"\nUploaded {len(upload_results)} files:")
+            for md_path, result in upload_results.items():
+                status = "Success" if not result.get("error") else f"Error: {result.get('error')}"
+                print(f"- {md_path}: {status}")
+        
+        # Show upload results file location
+        if file_uploader:
+            print(f"Upload results saved to: {processing_service.upload_results_file}")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 import os
 from pathlib import Path
-from typing import List, Set, Dict, Tuple, Any
+from typing import List, Set, Dict, Tuple, Any, Optional
 import json
 import numpy as np
 from markitdown import MarkItDown
+import requests
 
 # Import ollama for embeddings
 try:
@@ -54,6 +55,23 @@ class EmbeddingGenerator(ABC):
         Args:
             embeddings: Embeddings to save
             file_path: Path to save embeddings to
+        """
+        pass
+
+
+class FileUploader(ABC):
+    """Interface for uploading files to external services"""
+    
+    @abstractmethod
+    def upload_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        Upload a file to an external service
+        
+        Args:
+            file_path: Path to the file to upload
+            
+        Returns:
+            Response data from the upload service
         """
         pass
 
@@ -130,6 +148,55 @@ class NullEmbeddingGenerator(EmbeddingGenerator):
         pass
 
 
+class ApiFileUploader(FileUploader):
+    """Implementation of FileUploader using API requests"""
+    
+    def __init__(self, api_url: str, token: str):
+        """
+        Initialize with API URL and authentication token
+        
+        Args:
+            api_url: Base URL of the API
+            token: Authentication token
+        """
+        self.api_url = api_url.rstrip('/')
+        self.token = token
+        
+    def upload_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        Upload a file to the API
+        
+        Args:
+            file_path: Path to the file to upload
+            
+        Returns:
+            Response data from the API
+        """
+        url = f'{self.api_url}/api/v1/files/'
+        headers = {
+            'Authorization': f'Bearer {self.token}',
+            'Accept': 'application/json'
+        }
+        
+        try:
+            with open(file_path, 'rb') as f:
+                files = {'file': f}
+                response = requests.post(url, headers=headers, files=files)
+                response.raise_for_status()  # Raise exception for 4XX/5XX responses
+                return response.json()
+        except Exception as e:
+            print(f"Error uploading file {file_path}: {str(e)}")
+            return {"error": str(e), "file_path": file_path}
+
+
+class NullFileUploader(FileUploader):
+    """Null implementation of FileUploader for when file uploading is not needed"""
+    
+    def upload_file(self, file_path: str) -> Dict[str, Any]:
+        """No-op implementation"""
+        return {"status": "skipped", "file_path": file_path}
+
+
 class ExtensionBasedFileFinder(FileFinder):
     """Implementation of FileFinder that finds files based on extensions"""
     
@@ -193,6 +260,7 @@ class DocumentProcessingService:
                  file_finder: FileFinder,
                  document_processor: DocumentProcessor,
                  embedding_generator: EmbeddingGenerator = None,
+                 file_uploader: FileUploader = None,
                  output_dir: str = "output"):
         """
         Initialize with strategies for finding and processing files
@@ -201,13 +269,16 @@ class DocumentProcessingService:
             file_finder: Strategy for finding files
             document_processor: Strategy for processing documents
             embedding_generator: Strategy for generating embeddings (optional)
+            file_uploader: Strategy for uploading files (optional)
             output_dir: Directory to save markdown output files
         """
         self.file_finder = file_finder
         self.document_processor = document_processor
         self.embedding_generator = embedding_generator or NullEmbeddingGenerator()
+        self.file_uploader = file_uploader or NullFileUploader()
         self.output_dir = output_dir
         self.progress_file = os.path.join(output_dir, "processing_progress.json")
+        self.upload_results_file = os.path.join(output_dir, "upload_results.json")
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -265,9 +336,34 @@ class DocumentProcessingService:
         with open(self.progress_file, 'w') as f:
             json.dump(progress, f, indent=2)
     
-    def process_directory(self, directory: str) -> Tuple[Dict[str, str], Dict[str, str]]:
+    def _load_upload_results(self) -> Dict[str, Dict[str, Any]]:
         """
-        Process all matching documents in the directory and save as markdown
+        Load file upload results from JSON file
+        
+        Returns:
+            Dictionary mapping markdown file paths to upload results
+        """
+        if os.path.exists(self.upload_results_file):
+            try:
+                with open(self.upload_results_file, 'r') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+    
+    def _save_upload_results(self, results: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Save file upload results to JSON file
+        
+        Args:
+            results: Dictionary mapping markdown file paths to upload results
+        """
+        with open(self.upload_results_file, 'w') as f:
+            json.dump(results, f, indent=2)
+    
+    def process_directory(self, directory: str) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, Dict[str, Any]]]:
+        """
+        Process all matching documents in the directory, save as markdown, and upload
         
         Args:
             directory: Path to the directory to process
@@ -276,9 +372,11 @@ class DocumentProcessingService:
             Tuple containing:
             - Dictionary mapping file paths to their output markdown paths
             - Dictionary mapping file paths to errors (if any)
+            - Dictionary mapping markdown file paths to upload results
         """
-        # Load existing progress
+        # Load existing progress and upload results
         progress = self._load_progress()
+        upload_results = self._load_upload_results()
         errors = {}
         
         # Find all files to process
@@ -330,4 +428,19 @@ class DocumentProcessingService:
         # Save progress
         self._save_progress(progress)
         
-        return progress, errors
+        # Upload markdown files
+        new_upload_results = {}
+        for file_path, md_path in progress.items():
+            # Skip already uploaded files
+            if md_path in upload_results and upload_results[md_path].get("status") != "error":
+                continue
+                
+            # Upload the markdown file
+            result = self.file_uploader.upload_file(md_path)
+            upload_results[md_path] = result
+            new_upload_results[md_path] = result
+        
+        # Save upload results
+        self._save_upload_results(upload_results)
+        
+        return progress, errors, new_upload_results
