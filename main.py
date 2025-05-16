@@ -4,6 +4,7 @@ import argparse
 from document_processor import (
     ExtensionBasedFileFinder,
     MarkItDownProcessor,
+    OllamaEmbeddingGenerator,
     DocumentProcessingService
 )
 
@@ -15,6 +16,7 @@ def main():
     parser.add_argument("--input-dir", default="docs", help="Directory containing documents to process")
     parser.add_argument("--output-dir", default="output", help="Directory to save markdown output")
     parser.add_argument("--enable-plugins", action="store_true", help="Enable MarkItDown plugins")
+    parser.add_argument("--embedding-model", default="nomic-embed-text", help="Ollama model to use for embeddings")
     args = parser.parse_args()
     
     # Define file types to process (PDF, DOCX, and images)
@@ -28,9 +30,12 @@ def main():
     # Create components
     file_finder = ExtensionBasedFileFinder(extensions)
     document_processor = MarkItDownProcessor(enable_plugins=args.enable_plugins)
+    embedding_generator = OllamaEmbeddingGenerator(model=args.embedding_model)
+    
     processing_service = DocumentProcessingService(
         file_finder,
         document_processor,
+        embedding_generator,
         output_dir=args.output_dir
     )
     
@@ -70,6 +75,7 @@ def main():
         
         print(f"\nAll results saved to: {args.output_dir}")
         print(f"Progress file saved to: {processing_service.progress_file}")
+        print(f"Embeddings were generated using the '{args.embedding_model}' model")
 
 
 if __name__ == "__main__":

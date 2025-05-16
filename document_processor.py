@@ -1,9 +1,17 @@
 from abc import ABC, abstractmethod
 import os
 from pathlib import Path
-from typing import List, Set, Dict, Tuple
+from typing import List, Set, Dict, Tuple, Any
 import json
+import numpy as np
 from markitdown import MarkItDown
+
+# Import ollama for embeddings
+try:
+    import ollama
+except ImportError:
+    print("Warning: ollama package not found. Embeddings functionality will be disabled.")
+    ollama = None
 
 
 class FileFinder(ABC):
@@ -19,6 +27,104 @@ class DocumentProcessor(ABC):
     @abstractmethod
     def process_document(self, file_path: str) -> str:
         """Process a document and return the text content"""
+        pass
+
+
+class EmbeddingGenerator(ABC):
+    """Interface for generating embeddings from text"""
+    
+    @abstractmethod
+    def generate_embeddings(self, text: str) -> Any:
+        """
+        Generate embeddings from text
+        
+        Args:
+            text: Text to generate embeddings for
+            
+        Returns:
+            Embeddings representation (implementation-specific)
+        """
+        pass
+    
+    @abstractmethod
+    def save_embeddings(self, embeddings: Any, file_path: str) -> None:
+        """
+        Save embeddings to a file
+        
+        Args:
+            embeddings: Embeddings to save
+            file_path: Path to save embeddings to
+        """
+        pass
+
+
+class OllamaEmbeddingGenerator(EmbeddingGenerator):
+    """Implementation of EmbeddingGenerator using Ollama"""
+    
+    def __init__(self, model: str = "nomic-embed-text"):
+        """
+        Initialize with Ollama model configuration
+        
+        Args:
+            model: Ollama model to use for embeddings
+        """
+        self.model = model
+        self.is_available = ollama is not None
+        
+    def generate_embeddings(self, text: str) -> Any:
+        """
+        Generate embeddings using Ollama
+        
+        Args:
+            text: Text to generate embeddings for
+            
+        Returns:
+            Embeddings from Ollama or None if unavailable
+        """
+        if not self.is_available:
+            print("Warning: ollama package not available. Skipping embeddings generation.")
+            return None
+            
+        try:
+            response = ollama.embeddings(model=self.model, prompt=text)
+            return response.get('embedding')
+        except Exception as e:
+            print(f"Error generating embeddings: {str(e)}")
+            return None
+            
+    def save_embeddings(self, embeddings: Any, file_path: str) -> None:
+        """
+        Save embeddings to a file
+        
+        Args:
+            embeddings: Embeddings to save
+            file_path: Path to save embeddings to
+        """
+        if embeddings is None:
+            return
+            
+        try:
+            # Also save a JSON version for human readability/debugging
+            with open(file_path, 'w') as f:
+                json.dump({
+                    'model': self.model,
+                    'dimensions': len(embeddings),
+                    'embedding': embeddings
+                }, f, indent=2)
+                
+        except Exception as e:
+            print(f"Error saving embeddings: {str(e)}")
+
+
+class NullEmbeddingGenerator(EmbeddingGenerator):
+    """Null implementation of EmbeddingGenerator for when embeddings are not needed"""
+    
+    def generate_embeddings(self, text: str) -> None:
+        """No-op implementation"""
+        return None
+        
+    def save_embeddings(self, embeddings: Any, file_path: str) -> None:
+        """No-op implementation"""
         pass
 
 
@@ -81,17 +187,23 @@ class MarkItDownProcessor(DocumentProcessor):
 class DocumentProcessingService:
     """Service that finds and processes documents"""
     
-    def __init__(self, file_finder: FileFinder, document_processor: DocumentProcessor, output_dir: str = "output"):
+    def __init__(self,
+                 file_finder: FileFinder,
+                 document_processor: DocumentProcessor,
+                 embedding_generator: EmbeddingGenerator = None,
+                 output_dir: str = "output"):
         """
         Initialize with strategies for finding and processing files
         
         Args:
             file_finder: Strategy for finding files
             document_processor: Strategy for processing documents
+            embedding_generator: Strategy for generating embeddings (optional)
             output_dir: Directory to save markdown output files
         """
         self.file_finder = file_finder
         self.document_processor = document_processor
+        self.embedding_generator = embedding_generator or NullEmbeddingGenerator()
         self.output_dir = output_dir
         self.progress_file = os.path.join(output_dir, "processing_progress.json")
         
@@ -111,6 +223,20 @@ class DocumentProcessingService:
         base_name = os.path.basename(file_path)
         name_without_ext = os.path.splitext(base_name)[0]
         return os.path.join(self.output_dir, f"{name_without_ext}.md")
+    
+    def _get_embeddings_filename(self, file_path: str) -> str:
+        """
+        Generate a embeddings filename for the output file
+        
+        Args:
+            file_path: Original file path
+            
+        Returns:
+            Path to the embeddings output file
+        """
+        base_name = os.path.basename(file_path)
+        name_without_ext = os.path.splitext(base_name)[0]
+        return os.path.join(self.output_dir, f"{name_without_ext}.embeddings")
     
     def _load_progress(self) -> Dict[str, str]:
         """
@@ -164,6 +290,9 @@ class DocumentProcessingService:
                 
             # Generate output markdown filename
             md_filename = self._get_markdown_filename(file_path)
+
+            # Generate output embeddings filename
+            embeddings_filename = self._get_embeddings_filename(file_path)
             
             try:
                 # Process the document
@@ -171,7 +300,13 @@ class DocumentProcessingService:
                 
                 # Save content to markdown file
                 with open(md_filename, 'w', encoding='utf-8') as f:
+                    f.write(f"# Content extracted from {os.path.basename(file_path)}\n\n")
                     f.write(content)
+                
+                # Generate and save embeddings
+                embeddings = self.embedding_generator.generate_embeddings(content)
+                if embeddings is not None:
+                    self.embedding_generator.save_embeddings(embeddings, embeddings_filename)
                 
                 # Update progress
                 progress[file_path] = md_filename

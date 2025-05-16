@@ -4,6 +4,7 @@ import argparse
 from document_processor import (
     ExtensionBasedFileFinder,
     MarkItDownProcessor,
+    OllamaEmbeddingGenerator,
     DocumentProcessingService
 )
 
@@ -28,11 +29,13 @@ def main():
     # Create components following dependency injection pattern
     file_finder = ExtensionBasedFileFinder(extensions)
     document_processor = MarkItDownProcessor(enable_plugins=args.enable_plugins)
+    embedding_generator = OllamaEmbeddingGenerator(model="nomic-embed-text")
     
     # Create the service by injecting dependencies
     processing_service = DocumentProcessingService(
         file_finder,
         document_processor,
+        embedding_generator,
         output_dir=args.output_dir
     )
     
