@@ -26,10 +26,9 @@ The system is designed following SOLID principles, making it easy to extend and 
 
 ### Prerequisites
 
-- Python 3.6+
+- Python 3.11
 - MarkItDown library
 - Ollama (optional, for embeddings generation)
-- NumPy (for embeddings storage)
 
 ### Setup
 
