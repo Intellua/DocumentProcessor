@@ -8,6 +8,7 @@ from document_processor import (
     ApiFileUploader,
     DocumentProcessingService
 )
+import time
 
 def main():
     print("Hello from jdn-chunk!")
@@ -19,7 +20,7 @@ def main():
     parser.add_argument("--enable-plugins", action="store_true", help="Enable MarkItDown plugins")
     parser.add_argument("--embedding-model", default="nomic-embed-text", help="Ollama model to use for embeddings")
     parser.add_argument("--api-url", default="http://localhost:3000", help="API URL for uploading files")
-    parser.add_argument("--api-token", default="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImQxYjc5NjFmLTJmMGQtNGRiOC1iMWIzLTcxMWM3YjgxOWFkOCJ9.CNR6LNVIM5iO9ZaDy3qXD7oEVEDRi_9iv1zLCP9nPjc", help="API token for authentication")
+    parser.add_argument("--api-token", default="sk-1be9497213bc416cb05b6d64959df11f", help="API token for authentication")
     parser.add_argument("--skip-upload", action="store_true", help="Skip uploading files to API")
     parser.add_argument("--batch-size", type=int, default=10, help="Number of files to process in parallel")
     parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of worker threads")
@@ -95,6 +96,12 @@ def main():
         print(f"\nAll results saved to: {args.output_dir}")
         print(f"Progress file saved to: {processing_service.progress_file}")
         print(f"Embeddings were generated using the '{args.embedding_model}' model")
+        
+        print("Sleeping 10s before uploading")
+        time.sleep(10)
+
+        ids = [upload_results[x]['id'] for x in upload_results]
+        processing_service.add_files_to_knowledge(ids, api_url=args.api_url, token=args.api_token)
         
         # Show upload results if any
         if upload_results:

@@ -177,14 +177,9 @@ class ApiFileUploader(FileUploader):
             Response data from the API
         """
         url = f'{self.api_url}/api/v1/files/'
-        knowledge_url = f'{self.api_url}/api/v1/knowledge/060c4514-5756-4d7f-937c-62bc6674d37d/file/add'
         headers = {
             'Authorization': f'Bearer {self.token}',
             'Accept': 'application/json'
-        }
-        knowledge_headers = {
-        'Authorization': f'Bearer {self.token}',
-        'Content-Type': 'application/json'
         }
         
         try:
@@ -194,9 +189,6 @@ class ApiFileUploader(FileUploader):
                 response = requests.post(url, headers=headers, files=files)
                 response.raise_for_status()  # Raise exception for 4XX/5XX responses
                 result = response.json()
-                data = {'file_id': result['id']}
-                response = requests.post(knowledge_url, headers=knowledge_headers, json=data)
-                response.raise_for_status()
                 return result
 
         except Exception as e:
@@ -549,3 +541,20 @@ class DocumentProcessingService:
                 self._save_upload_results(upload_results)
         
         return progress, errors, new_upload_results
+    
+    def add_files_to_knowledge(self, ids, api_url: str, token: str):
+        knowledge_url = f'{api_url}/api/v1/knowledge/a6470419-7149-41de-8de1-e8b44404c7c8/file/add'
+        knowledge_headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+        }
+
+        for id in ids:
+            data = {'file_id': id}
+            try:
+                response = requests.post(knowledge_url, headers=knowledge_headers, json=data)
+
+                response.raise_for_status()
+            except Exception as e:
+                print(e)
+                print(response.json())
