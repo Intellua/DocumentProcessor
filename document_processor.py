@@ -9,6 +9,7 @@ import requests
 import concurrent.futures
 import threading
 from functools import partial
+from pathlib import Path
 
 # Import ollama for embeddings
 try:
@@ -188,7 +189,8 @@ class ApiFileUploader(FileUploader):
         
         try:
             with open(file_path, 'rb') as f:
-                files = {'file': f}
+                filename = Path(file_path).name
+                files = {'file': (filename, f, 'text/markdown')}
                 response = requests.post(url, headers=headers, files=files)
                 response.raise_for_status()  # Raise exception for 4XX/5XX responses
                 result = response.json()
