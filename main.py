@@ -30,7 +30,7 @@ def main():
     # Create components
     file_finder = ExtensionBasedFileFinder(extensions)
     document_processor = MarkItDownProcessor(enable_plugins=args.enable_plugins)
-    embedding_generator = OllamaEmbeddingGenerator(model=args.embedding_model)
+    embedding_generator = OllamaEmbeddingGenerator(model=args.embedding_model, base_url="http://localhost:11434", api_key=None)
     
     processing_service = DocumentProcessingService(
         file_finder,
