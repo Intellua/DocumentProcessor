@@ -22,7 +22,7 @@ def main():
     # Define file types to process (PDF, DOCX, and images)
     extensions = {
         # Documents
-        "pdf", "docx",
+        "pdf", "docx", "txt"
         # Images
         "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp"
     }
