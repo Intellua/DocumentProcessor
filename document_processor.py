@@ -408,6 +408,10 @@ class DocumentProcessingService:
         try:
             # Process the document
             content = self.document_processor.process_document(file_path)
+
+            # Skip empty content
+            if content == '':
+                return md_filename, False
             
             # Save content to markdown file
             with open(md_filename, 'w', encoding='utf-8') as f:
