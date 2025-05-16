@@ -104,7 +104,7 @@ class OllamaEmbeddingGenerator(EmbeddingGenerator):
         Returns:
             Embeddings from Ollama or None if unavailable
         """
-            
+        return None    
         try:
             response = self.client.embeddings(model=self.model, prompt=text)
             return response.get('embedding')
@@ -173,9 +173,14 @@ class ApiFileUploader(FileUploader):
             Response data from the API
         """
         url = f'{self.api_url}/api/v1/files/'
+        knowledge_url = f'{self.api_url}/api/v1/knowledge/060c4514-5756-4d7f-937c-62bc6674d37d/file/add'
         headers = {
             'Authorization': f'Bearer {self.token}',
             'Accept': 'application/json'
+        }
+        knowledge_headers = {
+        'Authorization': f'Bearer {self.token}',
+        'Content-Type': 'application/json'
         }
         
         try:
@@ -183,7 +188,10 @@ class ApiFileUploader(FileUploader):
                 files = {'file': f}
                 response = requests.post(url, headers=headers, files=files)
                 response.raise_for_status()  # Raise exception for 4XX/5XX responses
-                return response.json()
+                result = response.json()
+                data = {'file_id': result['id']}
+                response = requests.post(knowledge_url, headers=knowledge_headers, json=data)
+
         except Exception as e:
             print(f"Error uploading file {file_path}: {str(e)}")
             return {"error": str(e), "file_path": file_path}
