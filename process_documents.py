@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--api-url", default="http://localhost:3000", help="API URL for uploading files")
     parser.add_argument("--api-token", default="", help="API token for authentication")
     parser.add_argument("--skip-upload", action="store_true", help="Skip uploading files to API")
+    parser.add_argument("--batch-size", type=int, default=10, help="Number of files to process in parallel")
+    parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of worker threads")
     args = parser.parse_args()
     
     # Define file types to process
@@ -59,7 +61,11 @@ def main():
         print(f"Uploading markdown files to API at {args.api_url}")
     
     # Process documents and get results
-    progress, errors, upload_results = processing_service.process_directory(args.input_dir)
+    progress, errors, upload_results = processing_service.process_directory(
+        args.input_dir,
+        batch_size=args.batch_size,
+        max_workers=args.max_workers
+    )
     
     # Display results
     if not progress:

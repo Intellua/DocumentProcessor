@@ -11,7 +11,8 @@ This project provides a robust document processing system that:
 3. Generates embeddings using Ollama
 4. Saves results as markdown and embedding files
 5. Uploads markdown files to an API endpoint
-6. Implements a restart mechanism to continue processing where it left off
+6. Processes files in parallel batches for improved performance
+7. Implements a restart mechanism to continue processing where it left off
 
 The system is designed following SOLID principles, making it easy to extend and maintain.
 
@@ -20,6 +21,7 @@ The system is designed following SOLID principles, making it easy to extend and 
 - **Document Extraction**: Extract text from PDFs, DOCX files, and images
 - **Embeddings Generation**: Create embeddings using Ollama's models
 - **API Integration**: Upload processed markdown files to an API endpoint
+- **Parallel Processing**: Process files in parallel batches for improved performance
 - **Restart Capability**: Resume processing from where it left off
 - **Extensible Architecture**: Easily add support for new file types or processing methods
 - **Error Handling**: Gracefully handles processing errors and saves error information
@@ -69,6 +71,8 @@ Options:
 - `--api-url`: API URL for uploading files (default: "http://localhost:3000")
 - `--api-token`: API token for authentication
 - `--skip-upload`: Skip uploading files to API
+- `--batch-size`: Number of files to process in parallel (default: 10)
+- `--max-workers`: Maximum number of worker threads (default: auto)
 
 ## Architecture
 

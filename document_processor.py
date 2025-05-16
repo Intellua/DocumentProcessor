@@ -6,6 +6,9 @@ import json
 import numpy as np
 from markitdown import MarkItDown
 import requests
+import concurrent.futures
+import threading
+from functools import partial
 
 # Import ollama for embeddings
 try:
@@ -292,6 +295,10 @@ class DocumentProcessingService:
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
+        
+        # Add locks for thread safety
+        self.progress_lock = threading.Lock()
+        self.upload_results_lock = threading.Lock()
     
     def _get_markdown_filename(self, file_path: str) -> str:
         """
@@ -343,8 +350,9 @@ class DocumentProcessingService:
         Args:
             progress: Dictionary mapping file paths to output markdown paths
         """
-        with open(self.progress_file, 'w') as f:
-            json.dump(progress, f, indent=2)
+        with self.progress_lock:
+            with open(self.progress_file, 'w') as f:
+                json.dump(progress, f, indent=2)
     
     def _load_upload_results(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -368,15 +376,101 @@ class DocumentProcessingService:
         Args:
             results: Dictionary mapping markdown file paths to upload results
         """
-        with open(self.upload_results_file, 'w') as f:
-            json.dump(results, f, indent=2)
+        with self.upload_results_lock:
+            with open(self.upload_results_file, 'w') as f:
+                json.dump(results, f, indent=2)
     
-    def process_directory(self, directory: str) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, Dict[str, Any]]]:
+    def _process_file(self, file_path: str, progress: Dict[str, str], errors: Dict[str, str]) -> Tuple[str, bool]:
         """
-        Process all matching documents in the directory, save as markdown, and upload
+        Process a single file
+        
+        Args:
+            file_path: Path to the file to process
+            progress: Shared progress dictionary
+            errors: Shared errors dictionary
+            
+        Returns:
+            Tuple containing:
+            - Output markdown path
+            - Whether processing was successful
+        """
+        # Skip already processed files
+        with self.progress_lock:
+            if file_path in progress and os.path.exists(progress[file_path]):
+                return progress[file_path], True
+                
+        # Generate output filenames
+        md_filename = self._get_markdown_filename(file_path)
+        embeddings_filename = self._get_embeddings_filename(file_path)
+        
+        try:
+            # Process the document
+            content = self.document_processor.process_document(file_path)
+            
+            # Save content to markdown file
+            with open(md_filename, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # Generate and save embeddings
+            embeddings = self.embedding_generator.generate_embeddings(content)
+            if embeddings is not None:
+                self.embedding_generator.save_embeddings(embeddings, embeddings_filename)
+            
+            # Update progress
+            with self.progress_lock:
+                progress[file_path] = md_filename
+                
+            return md_filename, True
+                
+        except Exception as e:
+            # Record error
+            error_message = f"Error processing file: {str(e)}"
+            
+            with self.progress_lock:
+                errors[file_path] = error_message
+            
+            # Create error markdown file
+            with open(md_filename, 'w', encoding='utf-8') as f:
+                f.write(f"# Error processing {os.path.basename(file_path)}\n\n")
+                f.write(f"```\n{error_message}\n```\n")
+            
+            # Update progress even for errors
+            with self.progress_lock:
+                progress[file_path] = md_filename
+                
+            return md_filename, False
+    
+    def _upload_file(self, file_info: Tuple[str, str], upload_results: Dict[str, Dict[str, Any]], new_upload_results: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Upload a file to the external service
+        
+        Args:
+            file_info: Tuple containing (file_path, md_path)
+            upload_results: Shared upload results dictionary
+            new_upload_results: Shared new upload results dictionary
+        """
+        file_path, md_path = file_info
+        
+        # Skip already uploaded files
+        with self.upload_results_lock:
+            if md_path in upload_results and upload_results[md_path].get("status") != "error":
+                return
+        
+        # Upload the markdown file
+        result = self.file_uploader.upload_file(md_path)
+        
+        with self.upload_results_lock:
+            upload_results[md_path] = result
+            new_upload_results[md_path] = result
+    
+    def process_directory(self, directory: str, batch_size: int = 10, max_workers: int = None) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, Dict[str, Any]]]:
+        """
+        Process all matching documents in the directory in parallel batches, save as markdown, and upload
         
         Args:
             directory: Path to the directory to process
+            batch_size: Number of files to process in parallel
+            max_workers: Maximum number of worker threads (defaults to min(32, os.cpu_count() + 4))
             
         Returns:
             Tuple containing:
@@ -388,69 +482,64 @@ class DocumentProcessingService:
         progress = self._load_progress()
         upload_results = self._load_upload_results()
         errors = {}
+        new_upload_results = {}
         
         # Find all files to process
         files = self.file_finder.find_files(directory)
         
-        # Process each file
+        # Skip already processed files
+        files_to_process = []
         for file_path in files:
-            # Skip already processed files
-            if file_path in progress and os.path.exists(progress[file_path]):
-                continue
-                
-            # Generate output markdown filename
-            md_filename = self._get_markdown_filename(file_path)
-
-            # Generate output embeddings filename
-            embeddings_filename = self._get_embeddings_filename(file_path)
+            if file_path not in progress or not os.path.exists(progress[file_path]):
+                files_to_process.append(file_path)
+        
+        # Process files in parallel batches
+        if files_to_process:
+            print(f"Processing {len(files_to_process)} files in batches of {batch_size}...")
             
-            try:
-                # Process the document
-                content = self.document_processor.process_document(file_path)
+            # Process files in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Create a partial function with shared dictionaries
+                process_file_func = partial(self._process_file, progress=progress, errors=errors)
                 
-                # Save content to markdown file
-                with open(md_filename, 'w', encoding='utf-8') as f:
-                    f.write(content)
+                # Process files in batches
+                for i in range(0, len(files_to_process), batch_size):
+                    batch = files_to_process[i:i+batch_size]
+                    print(f"Processing batch {i//batch_size + 1}/{(len(files_to_process) + batch_size - 1)//batch_size} ({len(batch)} files)...")
+                    
+                    # Submit batch for processing
+                    futures = [executor.submit(process_file_func, file_path) for file_path in batch]
+                    concurrent.futures.wait(futures)
                 
-                # Generate and save embeddings
-                embeddings = self.embedding_generator.generate_embeddings(content)
-                if embeddings is not None:
-                    self.embedding_generator.save_embeddings(embeddings, embeddings_filename)
-                else:
-                    print("Embeddings are none")
-                
-                # Update progress
-                progress[file_path] = md_filename
-                
-            except Exception as e:
-                # Record error
-                error_message = f"Error processing file: {str(e)}"
-                errors[file_path] = error_message
-                
-                # Create error markdown file
-                with open(md_filename, 'w', encoding='utf-8') as f:
-                    f.write(f"# Error processing {os.path.basename(file_path)}\n\n")
-                    f.write(f"```\n{error_message}\n```\n")
-                
-                # Update progress even for errors
-                progress[file_path] = md_filename
+                # Save progress after each batch
+                self._save_progress(progress)
         
-        # Save progress
-        self._save_progress(progress)
-        
-        # Upload markdown files
-        new_upload_results = {}
-        for file_path, md_path in progress.items():
-            # Skip already uploaded files
-            if md_path in upload_results and upload_results[md_path].get("status") != "error":
-                continue
+        # Upload markdown files in parallel
+        if progress:
+            print(f"Uploading {len(progress)} markdown files in batches of {batch_size}...")
+            
+            # Create list of (file_path, md_path) tuples for uploading
+            upload_items = [(file_path, md_path) for file_path, md_path in progress.items()]
+            
+            # Upload files in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Create a partial function with shared dictionaries
+                upload_file_func = partial(
+                    self._upload_file,
+                    upload_results=upload_results,
+                    new_upload_results=new_upload_results
+                )
                 
-            # Upload the markdown file
-            result = self.file_uploader.upload_file(md_path)
-            upload_results[md_path] = result
-            new_upload_results[md_path] = result
-        
-        # Save upload results
-        self._save_upload_results(upload_results)
+                # Upload files in batches
+                for i in range(0, len(upload_items), batch_size):
+                    batch = upload_items[i:i+batch_size]
+                    print(f"Uploading batch {i//batch_size + 1}/{(len(upload_items) + batch_size - 1)//batch_size} ({len(batch)} files)...")
+                    
+                    # Submit batch for uploading
+                    futures = [executor.submit(upload_file_func, item) for item in batch]
+                    concurrent.futures.wait(futures)
+                
+                # Save upload results after each batch
+                self._save_upload_results(upload_results)
         
         return progress, errors, new_upload_results
