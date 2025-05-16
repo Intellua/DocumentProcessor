@@ -191,6 +191,8 @@ class ApiFileUploader(FileUploader):
                 result = response.json()
                 data = {'file_id': result['id']}
                 response = requests.post(knowledge_url, headers=knowledge_headers, json=data)
+                response.raise_for_status()
+                return result
 
         except Exception as e:
             print(f"Error uploading file {file_path}: {str(e)}")
